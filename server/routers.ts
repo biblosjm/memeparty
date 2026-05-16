@@ -256,6 +256,45 @@ export const appRouter = router({
       }),
 
     /**
+     * AI 문제 생성 (인터넷 문화력 테스트 모드)
+     */
+    generateQuestion: publicProcedure
+      .input(z.object({
+        gameMode: z.enum(["internet_culture", "friend_predict"]),
+        roundNumber: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const prompt = `Create a fun internet culture trivia question about memes, K-pop, gaming, or viral trends. 
+        Format as JSON with fields: content (question), options (array of 4 strings), correctAnswer (0-3 index).
+        Make it challenging but fun for Gen Z/Millennial audience.`;
+        
+        // For now, return a mock question. In production, call LLM
+        const mockQuestions = [
+          {
+            content: "'드립'이라는 단어의 원래 의미는?",
+            options: ["농담이나 재미있는 말", "물이 떨어지는 소리", "옷의 일부", "음악 장르"],
+            correctAnswer: 0,
+          },
+          {
+            content: "'오징어 게임'의 주인공 배우는?",
+            options: ["이순신", "박성웅", "정우성", "이정재"],
+            correctAnswer: 3,
+          },
+          {
+            content: "'아무튼 간에'는 어떤 유튜버의 인기 표현?",
+            options: ["침착맨", "대도서관", "악마", "보겸"],
+            correctAnswer: 0,
+          },
+        ];
+
+        const question = mockQuestions[Math.floor(Math.random() * mockQuestions.length)];
+
+        return {
+          question,
+        };
+      }),
+
+    /**
      * 이모지 반응 전송
      */
     sendEmojiReaction: publicProcedure
