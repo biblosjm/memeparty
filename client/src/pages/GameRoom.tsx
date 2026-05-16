@@ -171,7 +171,8 @@ export default function GameRoom() {
     setLocation("/");
   };
 
-  if (!roomCode || getRoomQuery.isLoading || !playerId) {
+  // 로딩 상태: roomCode나 playerId가 없으면 로딩 표시
+  if (!roomCode || playerId === null) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="p-8 text-center">
@@ -181,7 +182,19 @@ export default function GameRoom() {
     );
   }
 
-  if (getRoomQuery.error) {
+  // 방 데이터 로딩 중
+  if (getRoomQuery.isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <p className="text-foreground">방 정보를 불러오는 중입니다...</p>
+        </Card>
+      </div>
+    );
+  }
+
+  // 방 데이터 없음
+  if (!getRoomQuery.data) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="p-8 text-center">
