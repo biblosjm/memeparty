@@ -1,0 +1,43 @@
+{
+  "build_command": "pnpm run build",
+  "capabilities": [
+    "server",
+    "db",
+    "user"
+  ],
+  "dev_command": "pnpm run dev",
+  "env_vars": {
+    "DATABASE_URL": "mysql://1boy1Pc99tJ9QQM.630ef5a48d02:6Y7URNUxte2iP19HI0Vr@gateway06.us-east-1.prod.aws.tidbcloud.com:4000/aQC4gSEHFpjZeTa8d4Wf9T?ssl={\"rejectUnauthorized\":true}"
+  },
+  "experiments": [
+    "no_db_push"
+  ],
+  "git_remote": {
+    "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663663556425/aQC4gSEHFpjZeTa8d4Wf9T",
+    "access_key_id": "ASIAZV3A2ECZNIJRMIBY",
+    "secret_access_key": "4GgDEpxgWG99xkQz0JNVSqyVcf0keMZqnWoNFGzb",
+    "session_token": "IQoJb3JpZ2luX2VjEL///////////wEaCXVzLWVhc3QtMSJHMEUCICxxwOJvABQXWogrhgIWzXgu1/IS1ae1X4jt65dxu1DyAiEApK6Oo3QSWRMICUh18n4pMwmi2PNkzUi1nI7E3+tfagUq/gMIh///////////ARAEGgw2NjUzODYwOTg4NjYiDL7eG90E7RnNK3DvOSrSAxKbZoToSt8HZ22/VrpkQjmpJgXWVM0Esa7fqdTSka+P8TON0paO+WbZOIWp7+neIp5QENvRfXzzLthdxBCLFOE+WGstP54lgCt6J66y/JAM99WyKBJe/26/kq/GA27a4cwH/YqtOTvfGqYVYxT7kFCnypYKhsEso7ena99Hfs/NOxa6oFEi8akam1BlYKwhOXxoIStChoMv3MISQhhX5TC5fSEa3s0/aAnhaxSgxrMy1gVewfrX8K3N/fUunKR+p3CVdFk67lWrxNBRb5h4AXoPyMwhPvSRrjoGBOepw+S+9BYzJDNz6MiqHovAagySdSuoSnomyj3EmCqd/OzMiMrMFdbqZvcgrT7R8tB2R4CRh8Eov7SStIVuOcA3hkYnfjnNdIrZbcUU9Owof8lJovipeOcG2vrq2bEugYV2n5y0fUD3GxJU8CENghARpUUAyyM0kWy7pDSFT/mjz24jxL2gcj04k+mTvbZ1VlwO+BOHx+QTwDqqnAL8yQSTiQtaLPmT0wXD3QQprEvE1Lm7qdplbZV7Sj2conFViE8AhmrwOgbgRKq64jAVe1KNZDiUTjthkKhTF9sfDoonjO7i0wEE1b8X/qf5iL+PJ/9KdmmdQzowvJOg0AY6nQFHXehQ1Vn2nM9yHx7NyMmrAHpCYkkKSMLzyhJCCiw/+OUA8RWsZ7PBWl3lqzDfJKQo+KxOvK5R+aR7vFrKN2TSviBZxSHI5gsJ0/B7NG1jWW0HvaalMSDZj/s65/N4amGCJQudoqpjUBOEdGlbJQ2Ryeq+xpvc8gmt/GMsrmkwobyRPe5HD4nGlE65ewl2bde4DQ5mN/2pL62beB/b",
+    "expiration": "2026-05-16T18:07:56.000Z"
+  },
+  "name": "memeparty",
+  "path": "/home/ubuntu/memeparty",
+  "port": 3000,
+  "secrets": {
+    "BUILT_IN_FORGE_API_KEY": "Hi3yXiTaN6MsNrZzHNNp6s",
+    "BUILT_IN_FORGE_API_URL": "https://forge.manus.ai",
+    "JWT_SECRET": "Lw3W68eYGD6q3KxFeJCUCR",
+    "OAUTH_SERVER_URL": "https://api.manus.im",
+    "OWNER_NAME": "지명 손",
+    "OWNER_OPEN_ID": "N26iW7NfyksbtbkgoaM6HB",
+    "VITE_ANALYTICS_ENDPOINT": "https://manus-analytics.com",
+    "VITE_ANALYTICS_WEBSITE_ID": "50d0b89f-7e29-424f-9413-b031c5db85ba",
+    "VITE_APP_ID": "aQC4gSEHFpjZeTa8d4Wf9T",
+    "VITE_APP_LOGO": "",
+    "VITE_APP_TITLE": "MemeParty - 실시간 밈 파티 플랫폼",
+    "VITE_FRONTEND_FORGE_API_KEY": "KXVhAtERBMg3UAwXvnGYk5",
+    "VITE_FRONTEND_FORGE_API_URL": "https://forge.manus.ai",
+    "VITE_OAUTH_PORTAL_URL": "https://manus.im"
+  },
+  "template_id": "web-db-user",
+  "test_command": "pnpm test"
+}
