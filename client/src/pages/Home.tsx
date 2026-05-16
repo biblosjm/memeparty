@@ -24,6 +24,7 @@ export default function Home() {
     if (!nickname.trim()) return;
 
     setIsLoading(true);
+    setShowNicknameDialog(false);
     try {
       const result = await createRoomMutation.mutateAsync({
         nickname,
@@ -35,6 +36,7 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to create room:", error);
       alert("방 생성에 실패했습니다.");
+      setShowNicknameDialog(true);
     } finally {
       setIsLoading(false);
     }
@@ -44,6 +46,7 @@ export default function Home() {
     if (!nickname.trim() || !roomCode.trim()) return;
 
     setIsLoading(true);
+    setShowNicknameDialog(false);
     try {
       const result = await joinRoomMutation.mutateAsync({
         roomCode,
@@ -56,6 +59,7 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to join room:", error);
       alert("방 참여에 실패했습니다.");
+      setShowNicknameDialog(true);
     } finally {
       setIsLoading(false);
     }
@@ -72,7 +76,6 @@ export default function Home() {
     } else if (pendingAction === "join") {
       handleJoinRoom();
     }
-    setShowNicknameDialog(false);
   };
 
   return (
@@ -197,19 +200,21 @@ export default function Home() {
             <DialogTitle className="text-foreground">닉네임 입력</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <Input
-              placeholder="게임에서 사용할 닉네임"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleNicknameSubmit()}
-              className="h-12 bg-input border-border focus:border-primary"
-              autoFocus
-            />
+              <Input
+                placeholder="게임에서 사용할 닉네임"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && !isLoading && handleNicknameSubmit()}
+                className="h-12 bg-input border-border focus:border-primary"
+                autoFocus
+                disabled={isLoading}
+              />
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 onClick={() => setShowNicknameDialog(false)}
                 className="flex-1 border-border hover:bg-secondary/50"
+                disabled={isLoading}
               >
                 취소
               </Button>
