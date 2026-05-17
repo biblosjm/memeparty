@@ -10,6 +10,14 @@ export interface Player {
   socketId: string;
 }
 
+export interface ChatMessage {
+  messageId: number;
+  playerId: number;
+  nickname: string;
+  message: string;
+  timestamp: Date;
+}
+
 interface JoinRoomPayload {
   roomId: number;
   playerId: number;
@@ -25,10 +33,11 @@ export interface GameContextType {
   roomCode: string | null;
   players: Player[];
   spectators: Player[];
+  chatMessages: ChatMessage[];
   gameStatus: "waiting" | "playing" | "voting" | "ended" | null;
   currentRound: number;
+  currentRoundId: number | null;
   
-  // Actions
   joinRoom: (roomId: number, playerId: number, nickname: string, role: "player" | "spectator", roomCode?: string) => void;
   leaveRoom: () => void;
   startGame: () => void;
@@ -50,10 +59,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [spectators, setSpectators] = useState<Player[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [gameStatus, setGameStatus] = useState<"waiting" | "playing" | "voting" | "ended" | null>(null);
   const [currentRound, setCurrentRound] = useState(0);
+  const [currentRoundId, setCurrentRoundId] = useState<number | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
+  const roomIdRef = useRef<number | null>(null);
+  const playerIdRef = useRef<number | null>(null);
   const pendingJoinRef = useRef<JoinRoomPayload | null>(null);
 
   const emitJoinRoom = useCallback((payload: JoinRoomPayload) => {
@@ -75,7 +88,24 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     pendingJoinRef.current = null;
   }, []);
 
-  // Initialize socket connection
+  const emitToRoom = useCallback((event: string, payload: Record<string, unknown>) => {
+    const activeSocket = socketRef.current;
+    const activeRoomId = roomIdRef.current;
+
+    if (!activeSocket?.connected) {
+      console.warn(`[Socket] ${event}: socket not connected`, payload);
+      return false;
+    }
+    if (!activeRoomId) {
+      console.warn(`[Socket] ${event}: roomId not set`, payload);
+      return false;
+    }
+
+    console.log(`[Socket] ${event} emit:`, { roomId: activeRoomId, ...payload });
+    activeSocket.emit(event, { roomId: activeRoomId, ...payload });
+    return true;
+  }, []);
+
   useEffect(() => {
     const newSocket = io(window.location.origin, {
       reconnection: true,
@@ -103,37 +133,60 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("players_updated", (data: { players: Player[]; spectators: Player[] }) => {
-      console.log("[Socket] players_updated:", {
-        playerCount: data.players.length,
-        players: data.players,
-        spectatorCount: data.spectators.length,
-      });
+      console.log("[Socket] players_updated:", { playerCount: data.players.length });
       setPlayers(data.players);
       setSpectators(data.spectators);
     });
 
-    newSocket.on("room_joined", (data: { players: Player[]; spectators: Player[]; roomId: number }) => {
-      console.log("[Socket] room_joined success:", {
-        roomId: data.roomId,
-        playerCount: data.players.length,
-        players: data.players,
-      });
+    newSocket.on("room_joined", (data: {
+      players: Player[];
+      spectators: Player[];
+      roomId: number;
+      gameStatus?: "waiting" | "playing" | "voting" | "ended";
+      currentRound?: number;
+      currentRoundId?: number | null;
+    }) => {
+      console.log("[Socket] room_joined:", data);
       setPlayers(data.players);
       setSpectators(data.spectators);
+      if (data.gameStatus) setGameStatus(data.gameStatus);
+      if (data.currentRound !== undefined) setCurrentRound(data.currentRound);
+      if (data.currentRoundId !== undefined) setCurrentRoundId(data.currentRoundId ?? null);
     });
 
-    newSocket.on("game_started", (data: { roundNumber: number; gameMode: string }) => {
+    newSocket.on("game_state_updated", (data: {
+      gameStatus: "waiting" | "playing" | "voting" | "ended";
+      currentRound: number;
+      currentRoundId?: number | null;
+    }) => {
+      console.log("[Socket] game_state_updated:", data);
+      setGameStatus(data.gameStatus);
+      setCurrentRound(data.currentRound);
+      if (data.currentRoundId !== undefined) setCurrentRoundId(data.currentRoundId ?? null);
+    });
+
+    newSocket.on("game_started", (data: { roundNumber: number; roundId?: number; gameMode: string }) => {
+      console.log("[Socket] game_started:", data);
       setGameStatus("playing");
       setCurrentRound(data.roundNumber);
+      if (data.roundId) setCurrentRoundId(data.roundId);
     });
 
     newSocket.on("round_started", (data: { roundId: number; roundNumber: number; timeLimit: number }) => {
+      console.log("[Socket] round_started:", data);
       setGameStatus("playing");
       setCurrentRound(data.roundNumber);
+      setCurrentRoundId(data.roundId);
     });
 
     newSocket.on("round_ended", () => {
+      console.log("[Socket] round_ended");
       setGameStatus("voting");
+    });
+
+    newSocket.on("chat_message_received", (data: ChatMessage) => {
+      console.log("[Socket] chat_message_received:", data);
+      setChatMessages((prev) => [...prev, { ...data, timestamp: new Date(data.timestamp) }]);
     });
 
     newSocket.on("error", (data: { message: string }) => {
@@ -150,19 +203,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const joinRoom = useCallback((
-    roomId: number,
-    playerId: number,
+    joinRoomId: number,
+    joinPlayerId: number,
     nickname: string,
     role: "player" | "spectator",
     code?: string,
   ) => {
-    const payload: JoinRoomPayload = { roomId, playerId, nickname, role };
+    const payload: JoinRoomPayload = {
+      roomId: joinRoomId,
+      playerId: joinPlayerId,
+      nickname,
+      role,
+    };
 
-    console.log("[Socket] joinRoom called:", { ...payload, roomCode: code, connected: socketRef.current?.connected });
+    console.log("[Socket] joinRoom called:", { ...payload, roomCode: code });
 
-    setRoomId(roomId);
-    setPlayerId(playerId);
+    roomIdRef.current = joinRoomId;
+    playerIdRef.current = joinPlayerId;
+    setRoomId(joinRoomId);
+    setPlayerId(joinPlayerId);
     if (code) setRoomCode(code);
+    setGameStatus("waiting");
+    setChatMessages([]);
 
     pendingJoinRef.current = payload;
     emitJoinRoom(payload);
@@ -170,55 +232,63 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const leaveRoom = useCallback(() => {
     const activeSocket = socketRef.current;
-    if (!activeSocket || !roomId || !playerId) return;
+    const activeRoomId = roomIdRef.current;
+    const activePlayerId = playerIdRef.current;
 
-    console.log("[Socket] leave_room emit:", { roomId, playerId });
-    activeSocket.emit("leave_room", { roomId, playerId });
+    if (activeSocket && activeRoomId && activePlayerId) {
+      console.log("[Socket] leave_room emit:", { roomId: activeRoomId, playerId: activePlayerId });
+      activeSocket.emit("leave_room", { roomId: activeRoomId, playerId: activePlayerId });
+    }
 
     pendingJoinRef.current = null;
+    roomIdRef.current = null;
+    playerIdRef.current = null;
     setRoomId(null);
     setPlayerId(null);
     setRoomCode(null);
     setPlayers([]);
     setSpectators([]);
+    setChatMessages([]);
     setGameStatus(null);
     setCurrentRound(0);
-  }, [roomId, playerId]);
+    setCurrentRoundId(null);
+  }, []);
 
   const startGame = useCallback(() => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit("start_game", { roomId });
-  }, [roomId]);
+    const activePlayerId = playerIdRef.current;
+    emitToRoom("start_game", { playerId: activePlayerId });
+  }, [emitToRoom]);
 
   const startRound = useCallback((roundId: number) => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit("start_round", { roomId, roundId });
-  }, [roomId]);
+    emitToRoom("start_round", { roundId });
+  }, [emitToRoom]);
 
-  const submitResponse = useCallback((roundId: number, playerId: number, content: string) => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit("submit_response", { roomId, roundId, playerId, content });
-  }, [roomId]);
+  const submitResponse = useCallback((roundId: number, submitPlayerId: number, content: string) => {
+    emitToRoom("submit_response", { roundId, playerId: submitPlayerId, content });
+  }, [emitToRoom]);
 
   const submitVote = useCallback((roundId: number, voterId: number, responseId: number) => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit("submit_vote", { roomId, roundId, voterId, responseId });
-  }, [roomId]);
+    emitToRoom("submit_vote", { roundId, voterId, responseId });
+  }, [emitToRoom]);
 
   const endRound = useCallback((roundId: number) => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit("end_round", { roomId, roundId });
-  }, [roomId]);
+    emitToRoom("end_round", { roundId });
+  }, [emitToRoom]);
 
   const sendChatMessage = useCallback((message: string) => {
-    if (!socketRef.current || !roomId || !playerId) return;
-    socketRef.current.emit("chat_message", { roomId, playerId, message });
-  }, [roomId, playerId]);
+    const activePlayerId = playerIdRef.current;
+    if (!activePlayerId) {
+      console.warn("[Socket] chat_message: playerId not set");
+      return;
+    }
+    emitToRoom("chat_message", { playerId: activePlayerId, message });
+  }, [emitToRoom]);
 
   const sendEmojiReaction = useCallback((emoji: string) => {
-    if (!socketRef.current || !roomId || !playerId) return;
-    socketRef.current.emit("emoji_reaction", { roomId, playerId, emoji });
-  }, [roomId, playerId]);
+    const activePlayerId = playerIdRef.current;
+    if (!activePlayerId) return;
+    emitToRoom("emoji_reaction", { playerId: activePlayerId, emoji });
+  }, [emitToRoom]);
 
   const value: GameContextType = {
     socket,
@@ -228,8 +298,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     roomCode,
     players,
     spectators,
+    chatMessages,
     gameStatus,
     currentRound,
+    currentRoundId,
     joinRoom,
     leaveRoom,
     startGame,
