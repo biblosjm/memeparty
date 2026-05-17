@@ -31,6 +31,7 @@ export default function GameRoom() {
     socket,
     isConnected,
     roomId,
+    playerId: contextPlayerId,
     players,
     chatMessages,
     gameStatus,
@@ -118,24 +119,28 @@ export default function GameRoom() {
     return Array.from(merged.values());
   }, [getRoomQuery.data?.players, players]);
 
+  const resolvedRoomId = roomId ?? getRoomQuery.data?.room.id ?? null;
+
   // 5. 디버깅 로그
   useEffect(() => {
     console.log("[GameRoom] State:", {
       roomCode,
-      playerId,
+      localPlayerId: playerId,
+      contextRoomId: roomId,
+      contextPlayerId,
+      resolvedRoomId,
       isConnected,
       socketConnected: socket?.connected,
       dbPlayerCount: getRoomQuery.data?.players?.length ?? 0,
       socketPlayerCount: players.length,
       displayPlayerCount: displayPlayers.length,
-      displayPlayers,
-      roomData: getRoomQuery.data,
+      roomData: getRoomQuery.data?.room,
     });
-  }, [roomCode, playerId, isConnected, socket, getRoomQuery.data, players, displayPlayers]);
+  }, [roomCode, playerId, roomId, contextPlayerId, resolvedRoomId, isConnected, socket, getRoomQuery.data, players.length, displayPlayers.length]);
 
-  // 6. 방 참여 (room 데이터가 로드되고 playerId가 설정된 후)
+  // 6. 방 참여 — socket 연결과 무관하게 session 즉시 등록, socket은 연결 후 join emit
   useEffect(() => {
-    if (!roomCode || !playerId || !getRoomQuery.data || !isConnected) {
+    if (!roomCode || !playerId || !getRoomQuery.data) {
       console.log("[GameRoom] Not ready to join room:", {
         roomCode: !!roomCode,
         playerId: !!playerId,
@@ -157,10 +162,12 @@ export default function GameRoom() {
       playerId,
       nickname,
       role,
+      isConnected,
+      socketConnected: socket?.connected,
     });
 
     joinRoom(room.id, playerId, nickname, role, roomCode);
-  }, [roomCode, playerId, getRoomQuery.data, isConnected, joinRoom, socket]);
+  }, [roomCode, playerId, getRoomQuery.data, joinRoom]);
 
   // 게임 이벤트 리스너 (응답/투표 등 라운드 UI)
   useEffect(() => {
@@ -232,7 +239,16 @@ export default function GameRoom() {
   }, [roundStarted]);
 
   const handleStartGame = () => {
-    console.log("[GameRoom] handleStartGame:", { isHost, roomId, gameStatus });
+    console.log("[GameRoom] handleStartGame:", {
+      isHost,
+      contextRoomId: roomId,
+      resolvedRoomId,
+      contextPlayerId,
+      localPlayerId: playerId,
+      gameStatus,
+      socketConnected: socket?.connected,
+      isConnected,
+    });
     startGame();
   };
 
@@ -252,7 +268,14 @@ export default function GameRoom() {
   const handleSendChat = () => {
     if (!chatInput.trim() || playerId === null) return;
 
-    console.log("[GameRoom] handleSendChat:", { message: chatInput, roomId, playerId });
+    console.log("[GameRoom] handleSendChat:", {
+      message: chatInput,
+      contextRoomId: roomId,
+      resolvedRoomId,
+      contextPlayerId,
+      localPlayerId: playerId,
+      socketConnected: socket?.connected,
+    });
     sendChatMessage(chatInput);
     setChatInput("");
   };
