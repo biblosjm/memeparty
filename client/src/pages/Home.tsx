@@ -89,7 +89,7 @@ export default function Home() {
           </h1>
           <Zap className="w-10 h-10 text-accent" />
         </div>
-        <p className="text-xl text-muted-foreground font-medium">친구들과 함께 웃기고 즐기는 실시간 밈 파티</p>
+        <p className="text-xl text-muted-foreground font-medium">친구들과 함께 웃기고 즐기는 실시간 파티</p>
       </div>
 
       {/* Main Card */}
