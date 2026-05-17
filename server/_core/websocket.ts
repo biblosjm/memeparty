@@ -2,17 +2,68 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import { Server as HTTPServer } from "http";
 import * as db from "../db";
 
+interface PlayerInfo {
+  playerId: number;
+  nickname: string;
+  role: "player" | "spectator";
+  socketId: string;
+}
+
 interface GameRoomState {
   roomId: number;
   roomCode: string;
-  players: Map<number, any>;
-  spectators: Map<number, any>;
+  players: Map<number, PlayerInfo>;
+  spectators: Map<number, PlayerInfo>;
   currentRound: number;
   gameStatus: "waiting" | "playing" | "voting" | "ended";
 }
 
 const roomStates = new Map<number, GameRoomState>();
 const playerSockets = new Map<number, string>(); // playerId -> socketId
+
+function buildPlayersPayload(roomState: GameRoomState) {
+  return {
+    players: Array.from(roomState.players.values()),
+    spectators: Array.from(roomState.spectators.values()),
+  };
+}
+
+async function syncPlayersFromDatabase(roomState: GameRoomState, roomId: number) {
+  const dbPlayers = await db.getPlayersByRoomId(roomId);
+
+  for (const dbPlayer of dbPlayers) {
+    const existingSocketId = playerSockets.get(dbPlayer.id) ?? "";
+    const info: PlayerInfo = {
+      playerId: dbPlayer.id,
+      nickname: dbPlayer.nickname,
+      role: dbPlayer.role as "player" | "spectator",
+      socketId: existingSocketId,
+    };
+
+    if (dbPlayer.role === "spectator") {
+      roomState.spectators.set(dbPlayer.id, info);
+    } else {
+      roomState.players.set(dbPlayer.id, info);
+    }
+  }
+}
+
+function removePlayerFromAllRooms(playerId: number, io: SocketIOServer) {
+  for (const [roomId, roomState] of roomStates.entries()) {
+    const removedFromPlayers = roomState.players.delete(playerId);
+    const removedFromSpectators = roomState.spectators.delete(playerId);
+
+    if (removedFromPlayers || removedFromSpectators) {
+      const payload = buildPlayersPayload(roomState);
+      io.to(`room-${roomId}`).emit("players_updated", payload);
+      console.log(`[WebSocket] Player ${playerId} removed from room ${roomId} on disconnect`);
+
+      if (roomState.players.size === 0 && roomState.spectators.size === 0) {
+        roomStates.delete(roomId);
+      }
+    }
+  }
+}
 
 export function setupWebSocket(httpServer: HTTPServer) {
   const io = new SocketIOServer(httpServer, {
@@ -31,8 +82,10 @@ export function setupWebSocket(httpServer: HTTPServer) {
     socket.on("join_room", async (data: { roomId: number; playerId: number; nickname: string; role: "player" | "spectator" }) => {
       const { roomId, playerId, nickname, role } = data;
 
+      console.log(`[WebSocket] join_room received:`, { roomId, playerId, nickname, role, socketId: socket.id });
+
       try {
-        socket.join(`room-${roomId}`);
+        await socket.join(`room-${roomId}`);
         playerSockets.set(playerId, socket.id);
 
         let roomState = roomStates.get(roomId);
@@ -46,25 +99,31 @@ export function setupWebSocket(httpServer: HTTPServer) {
             players: new Map(),
             spectators: new Map(),
             currentRound: room.currentRound,
-            gameStatus: room.status as any,
+            gameStatus: room.status as GameRoomState["gameStatus"],
           };
           roomStates.set(roomId, roomState);
         }
 
-        const playerInfo = { playerId, nickname, role, socketId: socket.id };
+        // DB에 저장된 모든 플레이어를 room state에 동기화
+        await syncPlayersFromDatabase(roomState, roomId);
+
+        // 현재 접속한 플레이어의 socket 정보 업데이트
+        const playerInfo: PlayerInfo = { playerId, nickname, role, socketId: socket.id };
         if (role === "player") {
           roomState.players.set(playerId, playerInfo);
+          roomState.spectators.delete(playerId);
         } else {
           roomState.spectators.set(playerId, playerInfo);
+          roomState.players.delete(playerId);
         }
 
-        // 모든 클라이언트에게 플레이어 목록 업데이트
-        io.to(`room-${roomId}`).emit("players_updated", {
-          players: Array.from(roomState.players.values()),
-          spectators: Array.from(roomState.spectators.values()),
-        });
+        const payload = buildPlayersPayload(roomState);
 
-        console.log(`[WebSocket] Player ${playerId} (${nickname}) joined room ${roomId} as ${role}`);
+        // 방 전체 + 입장한 클라이언트에 상태 전송
+        io.to(`room-${roomId}`).emit("players_updated", payload);
+        socket.emit("room_joined", { success: true, roomId, roomCode: roomState.roomCode, ...payload });
+
+        console.log(`[WebSocket] Player ${playerId} (${nickname}) joined room ${roomId} (${roomState.roomCode}), total players: ${payload.players.length}`);
       } catch (error) {
         console.error("[WebSocket] Error joining room:", error);
         socket.emit("error", { message: "Failed to join room" });
@@ -86,12 +145,9 @@ export function setupWebSocket(httpServer: HTTPServer) {
           roomState.players.delete(playerId);
           roomState.spectators.delete(playerId);
 
-          io.to(`room-${roomId}`).emit("players_updated", {
-            players: Array.from(roomState.players.values()),
-            spectators: Array.from(roomState.spectators.values()),
-          });
+          const payload = buildPlayersPayload(roomState);
+          io.to(`room-${roomId}`).emit("players_updated", payload);
 
-          // 방이 비어있으면 상태 제거
           if (roomState.players.size === 0 && roomState.spectators.size === 0) {
             roomStates.delete(roomId);
           }
@@ -143,7 +199,7 @@ export function setupWebSocket(httpServer: HTTPServer) {
         io.to(`room-${roomId}`).emit("round_started", {
           roundId,
           roundNumber: roomState.currentRound,
-          timeLimit: 40, // 40초
+          timeLimit: 40,
         });
 
         console.log(`[WebSocket] Round ${roomState.currentRound} started in room ${roomId}`);
@@ -188,13 +244,12 @@ export function setupWebSocket(httpServer: HTTPServer) {
       const { roomId, roundId, voterId, responseId } = data;
 
       try {
-        const vote = await db.createVote({
+        await db.createVote({
           roundId,
           voterId,
           responseId,
         });
 
-        // 응답의 투표 수 업데이트
         const responses = await db.getResponsesByRoundId(roundId);
         const response = responses.find(r => r.id === responseId);
         if (response) {
@@ -307,11 +362,11 @@ export function setupWebSocket(httpServer: HTTPServer) {
     socket.on("disconnect", () => {
       console.log(`[WebSocket] Client disconnected: ${socket.id}`);
 
-      // 플레이어 소켓 매핑에서 제거
       const entries = Array.from(playerSockets.entries());
-      for (const [playerId, socketId] of entries) {
+      for (const [pid, socketId] of entries) {
         if (socketId === socket.id) {
-          playerSockets.delete(playerId);
+          playerSockets.delete(pid);
+          removePlayerFromAllRooms(pid, io);
           break;
         }
       }

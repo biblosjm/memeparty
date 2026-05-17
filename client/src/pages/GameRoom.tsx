@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import type { Player } from "@/contexts/GameContext";
 import { useLocation, useRoute } from "wouter";
 import { useGame } from "@/contexts/GameContext";
 import { trpc } from "@/lib/trpc";
@@ -79,18 +80,40 @@ export default function GameRoom() {
 
   const generateImageMutation = trpc.game.generateMemeImage.useMutation();
 
+  // DB 플레이어 + socket 실시간 플레이어 병합
+  const displayPlayers = useMemo(() => {
+    const merged = new Map<number, Player>();
+
+    getRoomQuery.data?.players?.forEach((dbPlayer) => {
+      merged.set(dbPlayer.id, {
+        playerId: dbPlayer.id,
+        nickname: dbPlayer.nickname,
+        role: dbPlayer.role as "player" | "spectator",
+        socketId: "",
+      });
+    });
+
+    players.forEach((livePlayer) => {
+      merged.set(livePlayer.playerId, livePlayer);
+    });
+
+    return Array.from(merged.values());
+  }, [getRoomQuery.data?.players, players]);
+
   // 5. 디버깅 로그
   useEffect(() => {
     console.log("[GameRoom] State:", {
       roomCode,
       playerId,
-      isParsingParams,
       isConnected,
-      getRoomQueryLoading: getRoomQuery.isLoading,
-      getRoomQueryData: getRoomQuery.data,
-      getRoomQueryError: getRoomQuery.error,
+      socketConnected: socket?.connected,
+      dbPlayerCount: getRoomQuery.data?.players?.length ?? 0,
+      socketPlayerCount: players.length,
+      displayPlayerCount: displayPlayers.length,
+      displayPlayers,
+      roomData: getRoomQuery.data,
     });
-  }, [roomCode, playerId, isParsingParams, isConnected, getRoomQuery.isLoading, getRoomQuery.data, getRoomQuery.error]);
+  }, [roomCode, playerId, isConnected, socket, getRoomQuery.data, players, displayPlayers]);
 
   // 6. 방 참여 (room 데이터가 로드되고 playerId가 설정된 후)
   useEffect(() => {
@@ -100,20 +123,26 @@ export default function GameRoom() {
         playerId: !!playerId,
         roomData: !!getRoomQuery.data,
         isConnected,
+        socketConnected: socket?.connected,
       });
       return;
     }
 
+    const room = getRoomQuery.data.room;
+    const currentPlayer = getRoomQuery.data.players.find((p) => p.id === playerId);
+    const nickname = currentPlayer?.nickname ?? "Player";
+    const role = (currentPlayer?.role ?? "player") as "player" | "spectator";
+
     console.log("[GameRoom] Joining room with data:", {
-      roomId: getRoomQuery.data.room.id,
+      roomId: room.id,
+      roomCode,
       playerId,
+      nickname,
+      role,
     });
 
-    const room = getRoomQuery.data.room;
-    if (room) {
-      joinRoom(room.id, playerId, "Player", "player");
-    }
-  }, [roomCode, playerId, getRoomQuery.data, isConnected, joinRoom]);
+    joinRoom(room.id, playerId, nickname, role, roomCode);
+  }, [roomCode, playerId, getRoomQuery.data, isConnected, joinRoom, socket]);
 
   // 7. Socket 리스너 설정
   useEffect(() => {
@@ -368,11 +397,11 @@ export default function GameRoom() {
           <Card className="p-4 bg-card/50 border-primary/20 flex-1 overflow-hidden">
             <div className="flex items-center gap-2 mb-3">
               <Users className="w-5 h-5 text-accent" />
-              <p className="text-sm font-semibold text-foreground">플레이어 ({players.length})</p>
+              <p className="text-sm font-semibold text-foreground">플레이어 ({displayPlayers.length})</p>
             </div>
             <ScrollArea className="h-full">
               <div className="space-y-2">
-                {players.map((player) => (
+                {displayPlayers.map((player) => (
                   <div key={player.playerId} className="p-2 bg-secondary/50 rounded text-sm text-foreground">
                     {player.nickname}
                     {player.playerId === playerId && <span className="text-accent ml-2">(나)</span>}

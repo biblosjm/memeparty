@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 
 export interface Player {
@@ -8,6 +8,13 @@ export interface Player {
   score?: number;
   level?: number;
   socketId: string;
+}
+
+interface JoinRoomPayload {
+  roomId: number;
+  playerId: number;
+  nickname: string;
+  role: "player" | "spectator";
 }
 
 export interface GameContextType {
@@ -22,7 +29,7 @@ export interface GameContextType {
   currentRound: number;
   
   // Actions
-  joinRoom: (roomId: number, playerId: number, nickname: string, role: "player" | "spectator") => void;
+  joinRoom: (roomId: number, playerId: number, nickname: string, role: "player" | "spectator", roomCode?: string) => void;
   leaveRoom: () => void;
   startGame: () => void;
   startRound: (roundId: number) => void;
@@ -46,6 +53,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [gameStatus, setGameStatus] = useState<"waiting" | "playing" | "voting" | "ended" | null>(null);
   const [currentRound, setCurrentRound] = useState(0);
 
+  const socketRef = useRef<Socket | null>(null);
+  const pendingJoinRef = useRef<JoinRoomPayload | null>(null);
+
+  const emitJoinRoom = useCallback((payload: JoinRoomPayload) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket) {
+      console.warn("[Socket] emitJoinRoom: socket not initialized, queuing", payload);
+      pendingJoinRef.current = payload;
+      return;
+    }
+
+    if (!activeSocket.connected) {
+      console.log("[Socket] emitJoinRoom: not connected yet, queuing", payload);
+      pendingJoinRef.current = payload;
+      return;
+    }
+
+    console.log("[Socket] join_room emit:", payload);
+    activeSocket.emit("join_room", payload);
+    pendingJoinRef.current = null;
+  }, []);
+
   // Initialize socket connection
   useEffect(() => {
     const newSocket = io(window.location.origin, {
@@ -55,9 +84,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       reconnectionAttempts: 5,
     });
 
+    socketRef.current = newSocket;
+
     newSocket.on("connect", () => {
       console.log("[Socket] Connected:", newSocket.id);
       setIsConnected(true);
+
+      if (pendingJoinRef.current) {
+        console.log("[Socket] Replaying pending join_room on connect:", pendingJoinRef.current);
+        newSocket.emit("join_room", pendingJoinRef.current);
+        pendingJoinRef.current = null;
+      }
     });
 
     newSocket.on("disconnect", () => {
@@ -66,6 +103,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on("players_updated", (data: { players: Player[]; spectators: Player[] }) => {
+      console.log("[Socket] players_updated:", {
+        playerCount: data.players.length,
+        players: data.players,
+        spectatorCount: data.spectators.length,
+      });
+      setPlayers(data.players);
+      setSpectators(data.spectators);
+    });
+
+    newSocket.on("room_joined", (data: { players: Player[]; spectators: Player[]; roomId: number }) => {
+      console.log("[Socket] room_joined success:", {
+        roomId: data.roomId,
+        playerCount: data.players.length,
+        players: data.players,
+      });
       setPlayers(data.players);
       setSpectators(data.spectators);
     });
@@ -80,7 +132,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setCurrentRound(data.roundNumber);
     });
 
-    newSocket.on("round_ended", (data: { roundId: number; results: any[]; winner: any }) => {
+    newSocket.on("round_ended", () => {
       setGameStatus("voting");
     });
 
@@ -91,32 +143,39 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setSocket(newSocket);
 
     return () => {
+      socketRef.current = null;
+      pendingJoinRef.current = null;
       newSocket.disconnect();
     };
   }, []);
 
-  const joinRoom = useCallback((roomId: number, playerId: number, nickname: string, role: "player" | "spectator") => {
-    if (!socket) return;
+  const joinRoom = useCallback((
+    roomId: number,
+    playerId: number,
+    nickname: string,
+    role: "player" | "spectator",
+    code?: string,
+  ) => {
+    const payload: JoinRoomPayload = { roomId, playerId, nickname, role };
+
+    console.log("[Socket] joinRoom called:", { ...payload, roomCode: code, connected: socketRef.current?.connected });
 
     setRoomId(roomId);
     setPlayerId(playerId);
+    if (code) setRoomCode(code);
 
-    socket.emit("join_room", {
-      roomId,
-      playerId,
-      nickname,
-      role,
-    });
-  }, [socket]);
+    pendingJoinRef.current = payload;
+    emitJoinRoom(payload);
+  }, [emitJoinRoom]);
 
   const leaveRoom = useCallback(() => {
-    if (!socket || !roomId || !playerId) return;
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !roomId || !playerId) return;
 
-    socket.emit("leave_room", {
-      roomId,
-      playerId,
-    });
+    console.log("[Socket] leave_room emit:", { roomId, playerId });
+    activeSocket.emit("leave_room", { roomId, playerId });
 
+    pendingJoinRef.current = null;
     setRoomId(null);
     setPlayerId(null);
     setRoomCode(null);
@@ -124,75 +183,42 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setSpectators([]);
     setGameStatus(null);
     setCurrentRound(0);
-  }, [socket, roomId, playerId]);
+  }, [roomId, playerId]);
 
   const startGame = useCallback(() => {
-    if (!socket || !roomId) return;
-
-    socket.emit("start_game", {
-      roomId,
-    });
-  }, [socket, roomId]);
+    if (!socketRef.current || !roomId) return;
+    socketRef.current.emit("start_game", { roomId });
+  }, [roomId]);
 
   const startRound = useCallback((roundId: number) => {
-    if (!socket || !roomId) return;
-
-    socket.emit("start_round", {
-      roomId,
-      roundId,
-    });
-  }, [socket, roomId]);
+    if (!socketRef.current || !roomId) return;
+    socketRef.current.emit("start_round", { roomId, roundId });
+  }, [roomId]);
 
   const submitResponse = useCallback((roundId: number, playerId: number, content: string) => {
-    if (!socket || !roomId) return;
-
-    socket.emit("submit_response", {
-      roomId,
-      roundId,
-      playerId,
-      content,
-    });
-  }, [socket, roomId]);
+    if (!socketRef.current || !roomId) return;
+    socketRef.current.emit("submit_response", { roomId, roundId, playerId, content });
+  }, [roomId]);
 
   const submitVote = useCallback((roundId: number, voterId: number, responseId: number) => {
-    if (!socket || !roomId) return;
-
-    socket.emit("submit_vote", {
-      roomId,
-      roundId,
-      voterId,
-      responseId,
-    });
-  }, [socket, roomId]);
+    if (!socketRef.current || !roomId) return;
+    socketRef.current.emit("submit_vote", { roomId, roundId, voterId, responseId });
+  }, [roomId]);
 
   const endRound = useCallback((roundId: number) => {
-    if (!socket || !roomId) return;
-
-    socket.emit("end_round", {
-      roomId,
-      roundId,
-    });
-  }, [socket, roomId]);
+    if (!socketRef.current || !roomId) return;
+    socketRef.current.emit("end_round", { roomId, roundId });
+  }, [roomId]);
 
   const sendChatMessage = useCallback((message: string) => {
-    if (!socket || !roomId || !playerId) return;
-
-    socket.emit("chat_message", {
-      roomId,
-      playerId,
-      message,
-    });
-  }, [socket, roomId, playerId]);
+    if (!socketRef.current || !roomId || !playerId) return;
+    socketRef.current.emit("chat_message", { roomId, playerId, message });
+  }, [roomId, playerId]);
 
   const sendEmojiReaction = useCallback((emoji: string) => {
-    if (!socket || !roomId || !playerId) return;
-
-    socket.emit("emoji_reaction", {
-      roomId,
-      playerId,
-      emoji,
-    });
-  }, [socket, roomId, playerId]);
+    if (!socketRef.current || !roomId || !playerId) return;
+    socketRef.current.emit("emoji_reaction", { roomId, playerId, emoji });
+  }, [roomId, playerId]);
 
   const value: GameContextType = {
     socket,
