@@ -49,7 +49,7 @@ async function syncPlayersFromDatabase(roomState: GameRoomState, roomId: number)
 }
 
 function removePlayerFromAllRooms(playerId: number, io: SocketIOServer) {
-  for (const [roomId, roomState] of roomStates.entries()) {
+  for (const [roomId, roomState] of Array.from(roomStates.entries())) {
     const removedFromPlayers = roomState.players.delete(playerId);
     const removedFromSpectators = roomState.spectators.delete(playerId);
 
