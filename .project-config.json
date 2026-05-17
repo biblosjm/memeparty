@@ -1,8 +1,8 @@
 {
   "build_command": "pnpm run build",
   "capabilities": [
-    "server",
     "db",
+    "server",
     "user"
   ],
   "dev_command": "pnpm run dev",
@@ -14,10 +14,10 @@
   ],
   "git_remote": {
     "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663663556425/aQC4gSEHFpjZeTa8d4Wf9T",
-    "access_key_id": "ASIAZV3A2ECZNIJRMIBY",
-    "secret_access_key": "4GgDEpxgWG99xkQz0JNVSqyVcf0keMZqnWoNFGzb",
-    "session_token": "IQoJb3JpZ2luX2VjEL///////////wEaCXVzLWVhc3QtMSJHMEUCICxxwOJvABQXWogrhgIWzXgu1/IS1ae1X4jt65dxu1DyAiEApK6Oo3QSWRMICUh18n4pMwmi2PNkzUi1nI7E3+tfagUq/gMIh///////////ARAEGgw2NjUzODYwOTg4NjYiDL7eG90E7RnNK3DvOSrSAxKbZoToSt8HZ22/VrpkQjmpJgXWVM0Esa7fqdTSka+P8TON0paO+WbZOIWp7+neIp5QENvRfXzzLthdxBCLFOE+WGstP54lgCt6J66y/JAM99WyKBJe/26/kq/GA27a4cwH/YqtOTvfGqYVYxT7kFCnypYKhsEso7ena99Hfs/NOxa6oFEi8akam1BlYKwhOXxoIStChoMv3MISQhhX5TC5fSEa3s0/aAnhaxSgxrMy1gVewfrX8K3N/fUunKR+p3CVdFk67lWrxNBRb5h4AXoPyMwhPvSRrjoGBOepw+S+9BYzJDNz6MiqHovAagySdSuoSnomyj3EmCqd/OzMiMrMFdbqZvcgrT7R8tB2R4CRh8Eov7SStIVuOcA3hkYnfjnNdIrZbcUU9Owof8lJovipeOcG2vrq2bEugYV2n5y0fUD3GxJU8CENghARpUUAyyM0kWy7pDSFT/mjz24jxL2gcj04k+mTvbZ1VlwO+BOHx+QTwDqqnAL8yQSTiQtaLPmT0wXD3QQprEvE1Lm7qdplbZV7Sj2conFViE8AhmrwOgbgRKq64jAVe1KNZDiUTjthkKhTF9sfDoonjO7i0wEE1b8X/qf5iL+PJ/9KdmmdQzowvJOg0AY6nQFHXehQ1Vn2nM9yHx7NyMmrAHpCYkkKSMLzyhJCCiw/+OUA8RWsZ7PBWl3lqzDfJKQo+KxOvK5R+aR7vFrKN2TSviBZxSHI5gsJ0/B7NG1jWW0HvaalMSDZj/s65/N4amGCJQudoqpjUBOEdGlbJQ2Ryeq+xpvc8gmt/GMsrmkwobyRPe5HD4nGlE65ewl2bde4DQ5mN/2pL62beB/b",
-    "expiration": "2026-05-16T18:07:56.000Z"
+    "access_key_id": "ASIAZV3A2ECZKJJFFLNN",
+    "secret_access_key": "UIG7AL2X8wVgHWJNoqu/NvJrO+sVlegTdbyhr+5O",
+    "session_token": "IQoJb3JpZ2luX2VjEMf//////////wEaCXVzLWVhc3QtMSJHMEUCIQDTmeUv7hY19cOZrRZJMAaIAJaK+b7Abbq6DOnaXuAO0QIgG3e72tT01ZR40wO5bb80iZK9mdtC8GcLOynEu/tkGZ8q/gMIkP//////////ARAEGgw2NjUzODYwOTg4NjYiDNAcRulGTW/8a4O24irSA4iSx1WKZDKeEUGW4buMkAl/pKxqqhY4/uZ4CysNxbHP0eifGuj4Czgh0/jGmkFlAgTelMXuyfUavvxEDYyW3C/m0lxGMflusvIkKyT/QgJ9laBGLxn4QsoGnCNurXKzoughtFqAqRptV4UQ637BsEsxwj73JHnZvJFNAJYgStdWv26vKs7Wnjmi707EIldsVYjseWumpixMB8ovUIC9u17tzpmlyZEF5uPYh8VCdkAEii2DX0PoCwRwk2YjLXhOLIRSPdIGm9aB7IZGjMY5zemcEzm1JHqgRSvs3wrrCbpdmVbZDT4VAlyGWHNI1jd5SI4v+cBh6tSUnuNSj1GosBsAaB6PCZ3DRDzDrWj32A7LZvHOj7NgoBpODSBvFx6OOTBwDa7O1WPbSLe6ZyQ0JMyYHLEkMTVJjdwSsGJPmcOmnYmEOU6bGl7mDyy2WQZQb+GO1qeIHIUr3LtkslB8sJVLeVPPsJtnTTT2wxkLwoN3JmFu0v+T8TiLxn4IKr096aRomMH0fpZQQKFHXZ3mTRNQlpouurO/B2u2MiXwJFv4eLeKPya6Q3FG8pqBZu2Afn7EmY5Hwd4Hbd7iXoFGYtsEcVFCMIZT8hx7C2z5f5DiqoMw44Ci0AY6nQH9FtRPRXizzXOuwikPiiioUUUikhl/m0nH0NSkH4IB/Wqjaf4I5ebJpTuBViq112+cFIJgtWqj0ZSPtPEHOspD5L6BlLWdhPF033jUZBUs8pFx1xj8vSmViz7nxpp9M/fQTajXQ7XKa6M38EZNwVkYUljWdhKiw3aEhI+QagLHJ3rvNRZdtzOvYSPI1U2jPGxo2BAyoh3gxV5tMB+U",
+    "expiration": "2026-05-17T02:34:11.000Z"
   },
   "name": "memeparty",
   "path": "/home/ubuntu/memeparty",
