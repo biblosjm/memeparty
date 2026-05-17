@@ -15,7 +15,27 @@ interface GameRoomState {
   players: Map<number, PlayerInfo>;
   spectators: Map<number, PlayerInfo>;
   currentRound: number;
+  currentRoundId: number | null;
   gameStatus: "waiting" | "playing" | "voting" | "ended";
+  gameMode: string;
+}
+
+function getPlayerNickname(roomState: GameRoomState | undefined, playerId: number): string {
+  if (!roomState) return "Unknown";
+  return (
+    roomState.players.get(playerId)?.nickname ??
+    roomState.spectators.get(playerId)?.nickname ??
+    "Unknown"
+  );
+}
+
+function buildGameStatePayload(roomState: GameRoomState) {
+  return {
+    gameStatus: roomState.gameStatus,
+    currentRound: roomState.currentRound,
+    currentRoundId: roomState.currentRoundId,
+    gameMode: roomState.gameMode,
+  };
 }
 
 const roomStates = new Map<number, GameRoomState>();
@@ -98,8 +118,10 @@ export function setupWebSocket(httpServer: HTTPServer) {
             roomCode: room.roomCode,
             players: new Map(),
             spectators: new Map(),
-            currentRound: room.currentRound,
-            gameStatus: room.status as GameRoomState["gameStatus"],
+            currentRound: room.currentRound || 0,
+            currentRoundId: null,
+            gameStatus: room.status === "playing" ? "playing" : "waiting",
+            gameMode: room.gameMode,
           };
           roomStates.set(roomId, roomState);
         }
@@ -118,10 +140,17 @@ export function setupWebSocket(httpServer: HTTPServer) {
         }
 
         const payload = buildPlayersPayload(roomState);
+        const gameState = buildGameStatePayload(roomState);
 
-        // 방 전체 + 입장한 클라이언트에 상태 전송
         io.to(`room-${roomId}`).emit("players_updated", payload);
-        socket.emit("room_joined", { success: true, roomId, roomCode: roomState.roomCode, ...payload });
+        io.to(`room-${roomId}`).emit("game_state_updated", gameState);
+        socket.emit("room_joined", {
+          success: true,
+          roomId,
+          roomCode: roomState.roomCode,
+          ...payload,
+          ...gameState,
+        });
 
         console.log(`[WebSocket] Player ${playerId} (${nickname}) joined room ${roomId} (${roomState.roomCode}), total players: ${payload.players.length}`);
       } catch (error) {
@@ -162,22 +191,55 @@ export function setupWebSocket(httpServer: HTTPServer) {
     /**
      * 게임 시작
      */
-    socket.on("start_game", async (data: { roomId: number }) => {
+    socket.on("start_game", async (data: { roomId: number; playerId?: number }) => {
       const { roomId } = data;
+
+      console.log(`[WebSocket] start_game received:`, data);
 
       try {
         const roomState = roomStates.get(roomId);
         if (!roomState) throw new Error("Room state not found");
 
+        const room = await db.getRoomById(roomId);
+        if (!room) throw new Error("Room not found");
+
+        let roundId = roomState.currentRoundId;
+        if (!roundId) {
+          try {
+            await db.updateRoomStatus(roomId, "playing");
+            const roundResult = await db.createGameRound({
+              roomId,
+              roundNumber: 1,
+              status: "playing",
+              gameMode: room.gameMode,
+            });
+            roundId = roundResult.insertId;
+          } catch (dbError) {
+            console.warn("[WebSocket] DB round creation failed, using in-memory round:", dbError);
+            roundId = Date.now();
+          }
+        }
+
         roomState.gameStatus = "playing";
         roomState.currentRound = 1;
+        roomState.currentRoundId = roundId;
 
-        io.to(`room-${roomId}`).emit("game_started", {
+        const gameStartedPayload = {
           roundNumber: 1,
-          gameMode: "meme_title",
+          roundId,
+          gameMode: roomState.gameMode,
+        };
+        const gameState = buildGameStatePayload(roomState);
+
+        io.to(`room-${roomId}`).emit("game_started", gameStartedPayload);
+        io.to(`room-${roomId}`).emit("game_state_updated", gameState);
+        io.to(`room-${roomId}`).emit("round_started", {
+          roundId,
+          roundNumber: 1,
+          timeLimit: 40,
         });
 
-        console.log(`[WebSocket] Game started in room ${roomId}`);
+        console.log(`[WebSocket] Game started in room ${roomId}, roundId: ${roundId}`);
       } catch (error) {
         console.error("[WebSocket] Error starting game:", error);
         socket.emit("error", { message: "Failed to start game" });
@@ -226,8 +288,10 @@ export function setupWebSocket(httpServer: HTTPServer) {
 
         io.to(`room-${roomId}`).emit("response_submitted", {
           responseId: response.insertId,
+          id: response.insertId,
           playerId,
           content,
+          voteCount: 0,
         });
 
         console.log(`[WebSocket] Response submitted by player ${playerId} in round ${roundId}`);
@@ -302,24 +366,30 @@ export function setupWebSocket(httpServer: HTTPServer) {
     socket.on("chat_message", async (data: { roomId: number; playerId: number; message: string }) => {
       const { roomId, playerId, message } = data;
 
+      console.log(`[WebSocket] chat_message received:`, { roomId, playerId, message });
+
       try {
-        const chatMessage = await db.createChatMessage({
-          roomId,
-          playerId,
-          message,
-        });
+        const roomState = roomStates.get(roomId);
+        const nickname = getPlayerNickname(roomState, playerId);
 
-        const player = await db.getPlayerById(playerId);
+        let messageId = Date.now();
+        try {
+          const chatMessage = await db.createChatMessage({ roomId, playerId, message });
+          if (chatMessage.insertId) messageId = chatMessage.insertId;
+        } catch (dbError) {
+          console.warn("[WebSocket] Chat DB persist failed, broadcasting anyway:", dbError);
+        }
 
-        io.to(`room-${roomId}`).emit("chat_message_received", {
-          messageId: chatMessage.insertId,
+        const payload = {
+          messageId,
           playerId,
-          nickname: player?.nickname || "Unknown",
+          nickname,
           message,
           timestamp: new Date(),
-        });
+        };
 
-        console.log(`[WebSocket] Chat message from player ${playerId} in room ${roomId}`);
+        io.to(`room-${roomId}`).emit("chat_message_received", payload);
+        console.log(`[WebSocket] Chat broadcast to room-${roomId}:`, payload);
       } catch (error) {
         console.error("[WebSocket] Error sending chat message:", error);
         socket.emit("error", { message: "Failed to send message" });
@@ -333,18 +403,21 @@ export function setupWebSocket(httpServer: HTTPServer) {
       const { roomId, playerId, emoji } = data;
 
       try {
-        const reaction = await db.createEmojiReaction({
-          roomId,
-          playerId,
-          emoji,
-        });
+        const roomState = roomStates.get(roomId);
+        const nickname = getPlayerNickname(roomState, playerId);
 
-        const player = await db.getPlayerById(playerId);
+        let reactionId = Date.now();
+        try {
+          const reaction = await db.createEmojiReaction({ roomId, playerId, emoji });
+          if (reaction.insertId) reactionId = reaction.insertId;
+        } catch (dbError) {
+          console.warn("[WebSocket] Emoji DB persist failed, broadcasting anyway:", dbError);
+        }
 
         io.to(`room-${roomId}`).emit("emoji_reaction_received", {
-          reactionId: reaction.insertId,
+          reactionId,
           playerId,
-          nickname: player?.nickname || "Unknown",
+          nickname,
           emoji,
           timestamp: new Date(),
         });

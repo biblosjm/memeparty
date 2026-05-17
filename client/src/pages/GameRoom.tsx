@@ -8,15 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageCircle, Users, LogOut, Loader2 } from "lucide-react";
-
-interface ChatMessage {
-  messageId: number;
-  playerId: number;
-  nickname: string;
-  message: string;
-  timestamp: Date;
-}
+import { MessageCircle, Users, LogOut, Loader2, Play } from "lucide-react";
 
 interface GameResponse {
   id: number;
@@ -35,9 +27,23 @@ export default function GameRoom() {
   const [playerId, setPlayerId] = useState<number | null>(null);
   const [isParsingParams, setIsParsingParams] = useState(true);
 
-  const { socket, isConnected, roomId, players, gameStatus, currentRound, joinRoom, leaveRoom, submitResponse, submitVote, sendChatMessage, sendEmojiReaction } = useGame();
-
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const {
+    socket,
+    isConnected,
+    roomId,
+    players,
+    chatMessages,
+    gameStatus,
+    currentRound,
+    currentRoundId,
+    joinRoom,
+    leaveRoom,
+    startGame,
+    submitResponse,
+    submitVote,
+    sendChatMessage,
+    sendEmojiReaction,
+  } = useGame();
   const [responses, setResponses] = useState<GameResponse[]>([]);
   const [userResponse, setUserResponse] = useState("");
   const [chatInput, setChatInput] = useState("");
@@ -81,6 +87,18 @@ export default function GameRoom() {
   const generateImageMutation = trpc.game.generateMemeImage.useMutation();
 
   // DB 플레이어 + socket 실시간 플레이어 병합
+  const hostPlayerId = useMemo(() => {
+    const roomPlayers = getRoomQuery.data?.players ?? [];
+    if (roomPlayers.length === 0) return null;
+    return [...roomPlayers].sort(
+      (a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime(),
+    )[0].id;
+  }, [getRoomQuery.data?.players]);
+
+  const isHost = playerId !== null && hostPlayerId === playerId;
+  const isWaiting = !gameStatus || gameStatus === "waiting";
+  const isPlaying = gameStatus === "playing";
+
   const displayPlayers = useMemo(() => {
     const merged = new Map<number, Player>();
 
@@ -144,51 +162,63 @@ export default function GameRoom() {
     joinRoom(room.id, playerId, nickname, role, roomCode);
   }, [roomCode, playerId, getRoomQuery.data, isConnected, joinRoom, socket]);
 
-  // 7. Socket 리스너 설정
+  // 게임 이벤트 리스너 (응답/투표 등 라운드 UI)
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("game_started", () => {
+    const onGameStarted = () => {
       setGameStarted(true);
       setRoundStarted(true);
       setTimeLeft(40);
-    });
+    };
 
-    socket.on("round_started", () => {
+    const onRoundStarted = () => {
+      setGameStarted(true);
       setRoundStarted(true);
       setTimeLeft(40);
       setResponses([]);
       setUserResponse("");
-    });
+    };
 
-    socket.on("response_submitted", (data: GameResponse) => {
-      setResponses((prev) => [...prev, data]);
-    });
+    const onResponseSubmitted = (data: { responseId: number; playerId: number; content: string }) => {
+      setResponses((prev) => [
+        ...prev,
+        { id: data.responseId, playerId: data.playerId, content: data.content, voteCount: 0 },
+      ]);
+    };
 
-    socket.on("vote_submitted", (data: { responseId: number; voteCount: number }) => {
+    const onVoteSubmitted = (data: { responseId: number; voteCount: number }) => {
       setResponses((prev) =>
-        prev.map((r) => (r.id === data.responseId ? { ...r, voteCount: data.voteCount } : r))
+        prev.map((r) => (r.id === data.responseId ? { ...r, voteCount: data.voteCount } : r)),
       );
-    });
+    };
 
-    socket.on("round_ended", (data: { results: GameResponse[] }) => {
+    const onRoundEnded = (data: { results: GameResponse[] }) => {
       setRoundStarted(false);
-      setResponses(data.results);
-    });
+      setResponses(data.results ?? []);
+    };
 
-    socket.on("chat_message_received", (data: ChatMessage) => {
-      setChatMessages((prev) => [...prev, data]);
-    });
+    socket.on("game_started", onGameStarted);
+    socket.on("round_started", onRoundStarted);
+    socket.on("response_submitted", onResponseSubmitted);
+    socket.on("vote_submitted", onVoteSubmitted);
+    socket.on("round_ended", onRoundEnded);
 
     return () => {
-      socket.off("game_started");
-      socket.off("round_started");
-      socket.off("response_submitted");
-      socket.off("vote_submitted");
-      socket.off("round_ended");
-      socket.off("chat_message_received");
+      socket.off("game_started", onGameStarted);
+      socket.off("round_started", onRoundStarted);
+      socket.off("response_submitted", onResponseSubmitted);
+      socket.off("vote_submitted", onVoteSubmitted);
+      socket.off("round_ended", onRoundEnded);
     };
   }, [socket]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      setGameStarted(true);
+      setRoundStarted(true);
+    }
+  }, [isPlaying]);
 
   // 8. 타이머
   useEffect(() => {
@@ -201,22 +231,28 @@ export default function GameRoom() {
     return () => clearInterval(interval);
   }, [roundStarted]);
 
-  const handleSubmitResponse = () => {
-    if (!userResponse.trim() || playerId === null || !roomId) return;
+  const handleStartGame = () => {
+    console.log("[GameRoom] handleStartGame:", { isHost, roomId, gameStatus });
+    startGame();
+  };
 
-    submitResponse(roomId, playerId, userResponse);
+  const handleSubmitResponse = () => {
+    if (!userResponse.trim() || playerId === null || !currentRoundId) return;
+
+    submitResponse(currentRoundId, playerId, userResponse);
     setUserResponse("");
   };
 
   const handleVote = (responseId: number) => {
-    if (!roomId || playerId === null) return;
+    if (!currentRoundId || playerId === null) return;
 
-    submitVote(roomId, playerId, responseId);
+    submitVote(currentRoundId, playerId, responseId);
   };
 
   const handleSendChat = () => {
     if (!chatInput.trim() || playerId === null) return;
 
+    console.log("[GameRoom] handleSendChat:", { message: chatInput, roomId, playerId });
     sendChatMessage(chatInput);
     setChatInput("");
   };
@@ -335,12 +371,26 @@ export default function GameRoom() {
                   {gameStatus === "playing" ? "게임 진행 중" : gameStatus === "voting" ? "투표 중" : "대기 중"}
                 </p>
               </div>
-              {roundStarted && (
-                <div className="text-center">
-                  <p className="text-sm text-muted-foreground">남은 시간</p>
-                  <p className={`text-3xl font-bold ${timeLeft <= 10 ? "text-destructive" : "text-accent"}`}>{timeLeft}s</p>
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                {isHost && isWaiting && (
+                  <Button
+                    onClick={handleStartGame}
+                    className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90"
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    게임 시작
+                  </Button>
+                )}
+                {!isHost && isWaiting && (
+                  <p className="text-sm text-muted-foreground">호스트가 게임을 시작할 때까지 대기 중...</p>
+                )}
+                {roundStarted && (
+                  <div className="text-center">
+                    <p className="text-sm text-muted-foreground">남은 시간</p>
+                    <p className={`text-3xl font-bold ${timeLeft <= 10 ? "text-destructive" : "text-accent"}`}>{timeLeft}s</p>
+                  </div>
+                )}
+              </div>
             </div>
           </Card>
 
@@ -419,8 +469,8 @@ export default function GameRoom() {
             </div>
             <ScrollArea className="flex-1 mb-3">
               <div className="space-y-2">
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className="text-xs">
+                {chatMessages.map((msg) => (
+                  <div key={msg.messageId} className="text-xs">
                     <p className="text-accent font-semibold">{msg.nickname}</p>
                     <p className="text-foreground">{msg.message}</p>
                   </div>
