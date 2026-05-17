@@ -31,8 +31,20 @@ export default function Home() {
         gameMode,
       });
 
-      // 방 생성 후 게임 페이지로 이동
-      setLocation(`/room/${result.roomCode}?playerId=${result.playerId}`);
+      console.log("[Home] createRoom result:", result);
+
+      const { roomCode: createdRoomCode, playerId: createdPlayerId } = result;
+
+      if (!createdRoomCode || !createdPlayerId) {
+        console.error("[Home] createRoom missing fields:", {
+          roomCode: createdRoomCode,
+          playerId: createdPlayerId,
+          result,
+        });
+        throw new Error("Invalid createRoom response");
+      }
+
+      setLocation(`/room/${createdRoomCode}?playerId=${createdPlayerId}`);
     } catch (error) {
       console.error("Failed to create room:", error);
       alert("방 생성에 실패했습니다.");
@@ -54,8 +66,21 @@ export default function Home() {
         role: "player",
       });
 
-      // 방 참여 후 게임 페이지로 이동
-      setLocation(`/room/${result.room.roomCode}?playerId=${result.playerId}`);
+      console.log("[Home] joinRoom result:", result);
+
+      const joinedRoomCode = result.room?.roomCode;
+      const joinedPlayerId = result.playerId;
+
+      if (!joinedRoomCode || !joinedPlayerId) {
+        console.error("[Home] joinRoom missing fields:", {
+          roomCode: joinedRoomCode,
+          playerId: joinedPlayerId,
+          result,
+        });
+        throw new Error("Invalid joinRoom response");
+      }
+
+      setLocation(`/room/${joinedRoomCode}?playerId=${joinedPlayerId}`);
     } catch (error) {
       console.error("Failed to join room:", error);
       alert("방 참여에 실패했습니다.");

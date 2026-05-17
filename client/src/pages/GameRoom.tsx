@@ -26,10 +26,9 @@ interface GameResponse {
 
 export default function GameRoom() {
   const [, setLocation] = useLocation();
-  const [match] = useRoute("/room/:roomCode");
-  
-  // 1. 라우트에서 roomCode 추출
-  const roomCode = (match as any)?.roomCode as string | undefined;
+  // useRoute returns [matched: boolean, params: { roomCode: string }]
+  const [, routeParams] = useRoute("/room/:roomCode");
+  const roomCode = routeParams?.roomCode;
   
   // 2. URL 쿼리에서 playerId 추출
   const [playerId, setPlayerId] = useState<number | null>(null);
