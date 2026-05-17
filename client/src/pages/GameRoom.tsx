@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useGame } from "@/contexts/GameContext";
 import { trpc } from "@/lib/trpc";
@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageCircle, Users, LogOut } from "lucide-react";
+import { MessageCircle, Users, LogOut, Loader2 } from "lucide-react";
 
 interface ChatMessage {
   messageId: number;
@@ -27,7 +27,13 @@ interface GameResponse {
 export default function GameRoom() {
   const [, setLocation] = useLocation();
   const [match] = useRoute("/room/:roomCode");
+  
+  // 1. 라우트에서 roomCode 추출
   const roomCode = (match as any)?.roomCode as string | undefined;
+  
+  // 2. URL 쿼리에서 playerId 추출
+  const [playerId, setPlayerId] = useState<number | null>(null);
+  const [isParsingParams, setIsParsingParams] = useState(true);
 
   const { socket, isConnected, roomId, players, gameStatus, currentRound, joinRoom, leaveRoom, submitResponse, submitVote, sendChatMessage, sendEmojiReaction } = useGame();
 
@@ -39,33 +45,78 @@ export default function GameRoom() {
   const [roundStarted, setRoundStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(40);
   const [memeImage, setMemeImage] = useState<string | null>(null);
-  const [playerId, setPlayerId] = useState<number | null>(null);
 
-  // Get playerId from URL query params
+  // 3. URL 파라미터 파싱 (한 번만 실행)
   useEffect(() => {
+    console.log("[GameRoom] Parsing URL parameters...");
     const params = new URLSearchParams(window.location.search);
-    const id = params.get('playerId');
-    if (id) setPlayerId(parseInt(id));
-  }, []);
+    const playerIdStr = params.get('playerId');
+    
+    console.log("[GameRoom] URL search:", window.location.search);
+    console.log("[GameRoom] playerId from URL:", playerIdStr);
+    
+    if (playerIdStr) {
+      const parsedId = parseInt(playerIdStr, 10);
+      if (!isNaN(parsedId)) {
+        console.log("[GameRoom] Successfully parsed playerId:", parsedId);
+        setPlayerId(parsedId);
+      } else {
+        console.error("[GameRoom] Failed to parse playerId:", playerIdStr);
+      }
+    }
+    
+    setIsParsingParams(false);
+  }, []); // 빈 의존성 배열 - 마운트 시 한 번만 실행
 
+  // 4. room 데이터 쿼리
   const getRoomQuery = trpc.game.getRoom.useQuery(
     { roomCode: roomCode || "" },
-    { enabled: !!roomCode, retry: false }
+    { 
+      enabled: !!roomCode && !isParsingParams, // roomCode가 있고 파라미터 파싱이 완료되었을 때만 실행
+      retry: 1,
+      staleTime: 0, // 항상 fresh 데이터 가져오기
+    }
   );
 
   const generateImageMutation = trpc.game.generateMemeImage.useMutation();
 
-  // Initialize room join
+  // 5. 디버깅 로그
   useEffect(() => {
-    if (!roomCode || !isConnected || !getRoomQuery.data || !playerId) return;
+    console.log("[GameRoom] State:", {
+      roomCode,
+      playerId,
+      isParsingParams,
+      isConnected,
+      getRoomQueryLoading: getRoomQuery.isLoading,
+      getRoomQueryData: getRoomQuery.data,
+      getRoomQueryError: getRoomQuery.error,
+    });
+  }, [roomCode, playerId, isParsingParams, isConnected, getRoomQuery.isLoading, getRoomQuery.data, getRoomQuery.error]);
+
+  // 6. 방 참여 (room 데이터가 로드되고 playerId가 설정된 후)
+  useEffect(() => {
+    if (!roomCode || !playerId || !getRoomQuery.data || !isConnected) {
+      console.log("[GameRoom] Not ready to join room:", {
+        roomCode: !!roomCode,
+        playerId: !!playerId,
+        roomData: !!getRoomQuery.data,
+        isConnected,
+      });
+      return;
+    }
+
+    console.log("[GameRoom] Joining room with data:", {
+      roomId: getRoomQuery.data.room.id,
+      playerId,
+    });
 
     const room = getRoomQuery.data.room;
     if (room) {
       joinRoom(room.id, playerId, "Player", "player");
     }
-  }, [roomCode, isConnected, getRoomQuery.data?.room.id, playerId, joinRoom]);
+  }, [roomCode, playerId, getRoomQuery.data, isConnected, joinRoom]);
 
-  // Setup socket listeners
+  // 7. Socket 리스너 설정
   useEffect(() => {
     if (!socket) return;
 
@@ -98,11 +149,7 @@ export default function GameRoom() {
     });
 
     socket.on("chat_message_received", (data: ChatMessage) => {
-      setChatMessages((prev) => [data, ...prev].slice(0, 50));
-    });
-
-    socket.on("emoji_reaction_received", (data: { emoji: string; nickname: string }) => {
-      console.log(`${data.nickname} reacted with ${data.emoji}`);
+      setChatMessages((prev) => [...prev, data]);
     });
 
     return () => {
@@ -112,36 +159,22 @@ export default function GameRoom() {
       socket.off("vote_submitted");
       socket.off("round_ended");
       socket.off("chat_message_received");
-      socket.off("emoji_reaction_received");
     };
   }, [socket]);
 
-  // Timer countdown
+  // 8. 타이머
   useEffect(() => {
-    if (!roundStarted || timeLeft <= 0) return;
+    if (!roundStarted) return;
 
-    const timer = setTimeout(() => setTimeLeft((prev) => prev - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [roundStarted, timeLeft]);
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
 
-  // Generate meme image on round start
-  useEffect(() => {
-    if (!roundStarted || !roomId) return;
-
-    const generateImage = async () => {
-      try {
-        const result = await generateImageMutation.mutateAsync({ roundId: roomId });
-        setMemeImage(result.imageUrl || null);
-      } catch (error) {
-        console.error("Failed to generate image:", error);
-      }
-    };
-
-    generateImage();
-  }, [roundStarted, roomId, generateImageMutation]);
+    return () => clearInterval(interval);
+  }, [roundStarted]);
 
   const handleSubmitResponse = () => {
-    if (!userResponse.trim() || !roomId || playerId === null) return;
+    if (!userResponse.trim() || playerId === null || !roomId) return;
 
     submitResponse(roomId, playerId, userResponse);
     setUserResponse("");
@@ -171,34 +204,20 @@ export default function GameRoom() {
     setLocation("/");
   };
 
-  // 로딩 상태: roomCode나 playerId가 없으면 로딩 표시
-  if (!roomCode || playerId === null) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="p-8 text-center">
-          <p className="text-foreground">방을 로드 중입니다...</p>
-        </Card>
-      </div>
-    );
-  }
+  // 9. 로딩 상태 체크
+  console.log("[GameRoom] Render check:", {
+    roomCode: !!roomCode,
+    playerId: playerId !== null,
+    isParsingParams,
+    getRoomQueryLoading: getRoomQuery.isLoading,
+  });
 
-  // 방 데이터 로딩 중
-  if (getRoomQuery.isLoading) {
+  // Step 1: roomCode나 playerId가 없으면 로딩
+  if (!roomCode) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Card className="p-8 text-center">
-          <p className="text-foreground">방 정보를 불러오는 중입니다...</p>
-        </Card>
-      </div>
-    );
-  }
-
-  // 방 데이터 없음
-  if (!getRoomQuery.data) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="p-8 text-center">
-          <p className="text-destructive">방을 찾을 수 없습니다.</p>
+          <p className="text-foreground">방 코드를 찾을 수 없습니다.</p>
           <Button onClick={() => setLocation("/")} className="mt-4">
             홈으로 돌아가기
           </Button>
@@ -207,6 +226,60 @@ export default function GameRoom() {
     );
   }
 
+  // Step 2: playerId 파싱 중
+  if (isParsingParams) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-accent" />
+          <p className="text-foreground">매개변수를 확인하는 중입니다...</p>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 3: playerId가 파싱되지 않음
+  if (playerId === null) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <p className="text-destructive">플레이어 ID를 찾을 수 없습니다.</p>
+          <Button onClick={() => setLocation("/")} className="mt-4">
+            홈으로 돌아가기
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 4: room 데이터 로딩 중
+  if (getRoomQuery.isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-accent" />
+          <p className="text-foreground">방 정보를 불러오는 중입니다...</p>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 5: room 데이터가 없음
+  if (!getRoomQuery.data) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="p-8 text-center">
+          <p className="text-destructive">방을 찾을 수 없습니다.</p>
+          <p className="text-sm text-muted-foreground mt-2">방 코드: {roomCode}</p>
+          <Button onClick={() => setLocation("/")} className="mt-4">
+            홈으로 돌아가기
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  // Step 6: 모든 데이터 준비 완료 - 게임 화면 렌더링
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -261,7 +334,7 @@ export default function GameRoom() {
                   onKeyPress={(e) => e.key === "Enter" && handleSubmitResponse()}
                   className="flex-1 bg-input border-border"
                 />
-                <Button onClick={handleSubmitResponse} disabled={!userResponse.trim()} className="bg-accent hover:bg-accent/90">
+                <Button onClick={handleSubmitResponse} className="bg-accent hover:bg-accent/90">
                   제출
                 </Button>
               </div>
@@ -271,20 +344,18 @@ export default function GameRoom() {
           {/* Responses */}
           {responses.length > 0 && (
             <Card className="p-4 bg-card/50 border-primary/20 flex-1 overflow-hidden">
-              <h3 className="font-bold text-foreground mb-3">모든 답변</h3>
+              <p className="text-sm font-semibold text-foreground mb-3">응답 ({responses.length})</p>
               <ScrollArea className="h-full">
                 <div className="space-y-2">
                   {responses.map((response) => (
-                    <button
+                    <div
                       key={response.id}
                       onClick={() => handleVote(response.id)}
-                      className="w-full p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
+                      className="p-3 bg-secondary/50 rounded-lg cursor-pointer hover:bg-secondary transition-colors"
                     >
-                      <div className="flex items-center justify-between">
-                        <p className="text-foreground">{response.content}</p>
-                        <span className="text-accent font-bold">{response.voteCount}표</span>
-                      </div>
-                    </button>
+                      <p className="text-foreground">{response.content}</p>
+                      <p className="text-xs text-muted-foreground mt-1">👍 {response.voteCount}</p>
+                    </div>
                   ))}
                 </div>
               </ScrollArea>
@@ -293,75 +364,53 @@ export default function GameRoom() {
         </div>
 
         {/* Sidebar */}
-        <div className="md:col-span-1 flex flex-col gap-4 overflow-hidden">
+        <div className="flex flex-col gap-4 overflow-hidden">
           {/* Players */}
-          <Card className="p-4 bg-card/50 border-primary/20 flex-1 overflow-hidden flex flex-col">
+          <Card className="p-4 bg-card/50 border-primary/20 flex-1 overflow-hidden">
             <div className="flex items-center gap-2 mb-3">
               <Users className="w-5 h-5 text-accent" />
-              <h3 className="font-bold text-foreground">플레이어 ({players.length})</h3>
+              <p className="text-sm font-semibold text-foreground">플레이어 ({players.length})</p>
             </div>
-            <ScrollArea className="flex-1">
+            <ScrollArea className="h-full">
               <div className="space-y-2">
                 {players.map((player) => (
-                  <div key={player.playerId} className="p-2 rounded bg-secondary/30 text-sm text-foreground">
+                  <div key={player.playerId} className="p-2 bg-secondary/50 rounded text-sm text-foreground">
                     {player.nickname}
+                    {player.playerId === playerId && <span className="text-accent ml-2">(나)</span>}
                   </div>
                 ))}
               </div>
             </ScrollArea>
           </Card>
 
-          {/* Chat & Reactions */}
+          {/* Chat */}
           <Card className="p-4 bg-card/50 border-primary/20 flex-1 overflow-hidden flex flex-col">
-            <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-              <TabsList className="grid w-full grid-cols-2 mb-2 bg-secondary/50">
-                <TabsTrigger value="chat" className="text-xs">
-                  채팅
-                </TabsTrigger>
-                <TabsTrigger value="reactions" className="text-xs">
-                  반응
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="chat" className="flex-1 flex flex-col overflow-hidden">
-                <ScrollArea className="flex-1 mb-2">
-                  <div className="space-y-2">
-                    {chatMessages.map((msg) => (
-                      <div key={msg.messageId} className="text-xs">
-                        <span className="text-accent font-semibold">{msg.nickname}:</span>
-                        <span className="text-foreground ml-1">{msg.message}</span>
-                      </div>
-                    ))}
+            <div className="flex items-center gap-2 mb-3">
+              <MessageCircle className="w-5 h-5 text-accent" />
+              <p className="text-sm font-semibold text-foreground">채팅</p>
+            </div>
+            <ScrollArea className="flex-1 mb-3">
+              <div className="space-y-2">
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className="text-xs">
+                    <p className="text-accent font-semibold">{msg.nickname}</p>
+                    <p className="text-foreground">{msg.message}</p>
                   </div>
-                </ScrollArea>
-                <div className="flex gap-1">
-                  <Input
-                    placeholder="메시지..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && handleSendChat()}
-                    className="text-xs h-8 bg-input border-border"
-                  />
-                  <Button onClick={handleSendChat} size="sm" className="bg-accent hover:bg-accent/90">
-                    <MessageCircle className="w-4 h-4" />
-                  </Button>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="reactions" className="flex-1 flex items-center justify-center">
-                <div className="grid grid-cols-4 gap-2">
-                  {["😂", "🔥", "👍", "💯", "🎉", "😱", "🤔", "👏"].map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => handleEmojiReaction(emoji)}
-                      className="text-2xl hover:scale-125 transition-transform"
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </TabsContent>
-            </Tabs>
+                ))}
+              </div>
+            </ScrollArea>
+            <div className="flex gap-2">
+              <Input
+                placeholder="메시지..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleSendChat()}
+                className="flex-1 h-8 bg-input border-border text-sm"
+              />
+              <Button onClick={handleSendChat} size="sm" className="bg-accent hover:bg-accent/90">
+                전송
+              </Button>
+            </div>
           </Card>
         </div>
       </div>
