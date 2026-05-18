@@ -92,6 +92,25 @@ export const appRouter = router({
         const players = await db.getPlayersByRoomId(room.id);
         return { room, players };
       }),
+
+    generateQuestion: publicProcedure
+      .input(
+        z.object({
+          gameMode: z.string(),
+          roundNumber: z.number(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const questions = [
+          {
+            id: 1,
+            content: "다음 중 가장 밈스러운 것은?",
+            options: ["고양이", "개", "새", "물고기"],
+            correctAnswer: 0,
+          },
+        ];
+        return { question: questions[0] };
+      }),
   }),
 });
 

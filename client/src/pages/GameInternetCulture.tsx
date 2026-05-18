@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useGame } from "@/contexts/GameContext";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
